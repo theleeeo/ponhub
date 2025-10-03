@@ -19,6 +19,11 @@ export default function PONHatePage() {
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   useEffect(() => {
     const interval = setInterval(() => {
       setRotation((prev) => prev + 1);
@@ -84,22 +89,24 @@ export default function PONHatePage() {
   return (
     <div className="min-h-screen overflow-hidden relative bg-gradient-to-br from-yellow-300 via-pink-500 to-lime-400">
       {/* Chaotic background elements */}
-      <div className="absolute inset-0 opacity-30">
-        {[...Array(50)].map((_, i) => (
-          <div
-            key={i}
-            className="absolute bg-red-600 rounded-full animate-ping"
-            style={{
-              width: Math.random() * 100 + "px",
-              height: Math.random() * 100 + "px",
-              left: Math.random() * 100 + "%",
-              top: Math.random() * 100 + "%",
-              animationDelay: Math.random() * 2 + "s",
-              animationDuration: Math.random() * 3 + 2 + "s",
-            }}
-          />
-        ))}
-      </div>
+      {isMounted && (
+        <div className="absolute inset-0 opacity-30">
+          {[...Array(50)].map((_, i) => (
+            <div
+              key={i}
+              className="absolute bg-red-600 rounded-full animate-ping"
+              style={{
+                width: Math.random() * 100 + "px",
+                height: Math.random() * 100 + "px",
+                left: Math.random() * 100 + "%",
+                top: Math.random() * 100 + "%",
+                animationDelay: Math.random() * 2 + "s",
+                animationDuration: Math.random() * 3 + 2 + "s",
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="relative z-10 p-4 md:p-8">
         {/* Ugly rotating header */}
