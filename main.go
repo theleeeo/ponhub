@@ -53,7 +53,7 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.Handle("/comments", withCORS(http.HandlerFunc(commentsHandler)))
 
-	port := os.Getenv("SRV_PORT")
+	port := os.Getenv("API_PORT")
 	if port == "" {
 		port = "8080"
 	}
