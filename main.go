@@ -53,7 +53,7 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.Handle("/comments", withCORS(http.HandlerFunc(commentsHandler)))
 
-	port := os.Getenv("PORT")
+	port := os.Getenv("SRV_PORT")
 	if port == "" {
 		port = "8080"
 	}
@@ -83,11 +83,12 @@ func getComments(w http.ResponseWriter, r *http.Request) {
 	// Order newest first to mirror the Next stub behavior
 	rows, err := db.QueryContext(ctx, `
 		SELECT id::text,
-		       name,
-		       message,
-		       (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS ts
+			   name,
+			   message,
+			   (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS ts
 		FROM comments
-		ORDER BY id DESC`)
+		ORDER BY id DESC
+		LIMIT 50`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to fetch comments"})
 		return
