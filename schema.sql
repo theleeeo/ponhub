@@ -4,4 +4,5 @@ CREATE TABLE
         name TEXT NOT NULL,
         message TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW ()
+        parent_id BIGINT REFERENCES comments(id) ON DELETE CASCADE
     );

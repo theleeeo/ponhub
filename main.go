@@ -17,10 +17,11 @@ import (
 // id is a string; timestamp is milliseconds since epoch
 // so the frontend can drop this in without changes.
 type Comment struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Message   string `json:"message"`
-	Timestamp int64  `json:"timestamp"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Message   string  `json:"message"`
+	Timestamp int64   `json:"timestamp"`
+	ParentID  *string `json:"parentCommentId,omitempty"`
 }
 
 var db *sql.DB
@@ -76,6 +77,14 @@ func commentsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type CommentDTO struct {
+	ID        string       `json:"id"`
+	Name      string       `json:"name"`
+	Message   string       `json:"message"`
+	Timestamp int64        `json:"timestamp"`
+	Replies   []CommentDTO `json:"replies"`
+}
+
 func getComments(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -85,7 +94,8 @@ func getComments(w http.ResponseWriter, r *http.Request) {
 		SELECT id::text,
 			   name,
 			   message,
-			   (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS ts
+			   (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS ts,
+			   parent_id
 		FROM comments
 		ORDER BY id DESC
 		LIMIT 50`)
@@ -98,7 +108,7 @@ func getComments(w http.ResponseWriter, r *http.Request) {
 	out := make([]Comment, 0, 32)
 	for rows.Next() {
 		var c Comment
-		if err := rows.Scan(&c.ID, &c.Name, &c.Message, &c.Timestamp); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Message, &c.Timestamp, &c.ParentID); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to decode comments"})
 			return
 		}
@@ -109,7 +119,33 @@ func getComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, out)
+	// Convert flat comments to nested CommentDTOs
+	dtoMap := make(map[string]*CommentDTO)
+	var roots []CommentDTO
+
+	for _, c := range out {
+		dto := CommentDTO{
+			ID:        c.ID,
+			Name:      c.Name,
+			Message:   c.Message,
+			Timestamp: c.Timestamp,
+			Replies:   []CommentDTO{},
+		}
+		dtoMap[c.ID] = &dto
+	}
+
+	for _, c := range out {
+		if c.ParentID != nil && dtoMap[*c.ParentID] != nil {
+			parent := dtoMap[*c.ParentID]
+			parent.Replies = append(parent.Replies, *dtoMap[c.ID])
+		} else {
+			roots = append(roots, *dtoMap[c.ID])
+		}
+	}
+
+	outDTO := roots
+
+	writeJSON(w, http.StatusOK, outDTO)
 }
 
 func postComment(w http.ResponseWriter, r *http.Request) {
@@ -117,8 +153,9 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var payload struct {
-		Name    *string `json:"name"`
-		Message *string `json:"message"`
+		Name     *string `json:"name"`
+		Message  *string `json:"message"`
+		ParentID *string `json:"parentId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
@@ -135,14 +172,15 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	var c Comment
 	// created_at defaults to NOW(); we return ms-since-epoch to match stub
 	err := db.QueryRowContext(ctx, `
-		INSERT INTO comments (name, message)
-		VALUES ($1, $2)
+		INSERT INTO comments (name, message, parent_id)
+		VALUES ($1, $2, $3)
 		RETURNING id::text,
 		          name,
 		          message,
-		          (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS ts`,
-		name, message,
-	).Scan(&c.ID, &c.Name, &c.Message, &c.Timestamp)
+		          (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS ts,
+				  parent_id`,
+		name, message, payload.ParentID,
+	).Scan(&c.ID, &c.Name, &c.Message, &c.Timestamp, &c.ParentID)
 	if err != nil {
 		log.Printf("insert error: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create comment"})
