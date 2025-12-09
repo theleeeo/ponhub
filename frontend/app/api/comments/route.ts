@@ -5,6 +5,15 @@ interface Comment {
   name: string;
   message: string;
   timestamp: number;
+  reactions: Record<string, number>;
+  replies: Reply[];
+}
+
+interface Reply {
+  id: string;
+  name: string;
+  message: string;
+  timestamp: number;
 }
 
 export async function GET() {
@@ -29,7 +38,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, message } = body;
+    const { name, message, parentId } = body;
 
     if (!name?.trim() || !message?.trim()) {
       return NextResponse.json(
@@ -38,6 +47,28 @@ export async function POST(request: Request) {
       );
     }
 
+    // Handle replies
+    if (parentId) {
+      const res = await fetch(
+        `${
+          process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:8080"
+        }/comments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, message, parentId }),
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to create reply");
+      }
+
+      const reply: Reply = await res.json();
+      return NextResponse.json(reply, { status: 201 });
+    }
+
+    // Handle new comment
     const res = await fetch(
       `${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:8080"}/comments`,
       {

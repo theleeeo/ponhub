@@ -4,11 +4,20 @@ import type React from "react";
 
 import { useState, useEffect } from "react";
 
+interface Reply {
+  id: string;
+  name: string;
+  message: string;
+  timestamp: number;
+}
+
 interface Comment {
   id: string;
   name: string;
   message: string;
   timestamp: number;
+  reactions: Record<string, number>;
+  replies: Reply[];
 }
 
 export default function PONHatePage() {
@@ -18,6 +27,7 @@ export default function PONHatePage() {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
 
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
@@ -83,6 +93,76 @@ export default function PONHatePage() {
       console.error("Failed to submit comment:", error);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleReaction = async (commentId: string, emoji: string) => {
+    try {
+      setComments((prevComments) =>
+        prevComments.map((comment) =>
+          comment.id === commentId
+            ? {
+                ...comment,
+                reactions: {
+                  ...comment.reactions,
+                  [emoji]: (comment.reactions[emoji] || 0) + 1,
+                },
+              }
+            : comment
+        )
+      );
+
+      const response = await fetch("/api/reactions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "reaction",
+          commentId,
+          emoji,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to add reaction");
+      }
+    } catch (error) {
+      console.error("Failed to add reaction:", error);
+    }
+  };
+
+  const handleReply = async (commentId: string) => {
+    if (!name.trim() || !message.trim()) return;
+
+    try {
+      const response = await fetch("/api/comments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          parentId: commentId,
+          name: name.trim(),
+          message: message.trim(),
+        }),
+      });
+
+      if (response.ok) {
+        const addedReply = await response.json();
+        setComments(
+          comments.map((c) =>
+            c.id === commentId
+              ? { ...c, replies: [...c.replies, addedReply] }
+              : c
+          )
+        );
+        setName("");
+        setMessage("");
+        setReplyingTo(null);
+      }
+    } catch (error) {
+      console.error("Failed to submit reply:", error);
     }
   };
 
@@ -292,9 +372,82 @@ export default function PONHatePage() {
                       {new Date(comment.timestamp).toLocaleDateString()}
                     </span>
                   </div>
-                  <p className="text-lg font-bold text-red-700 leading-tight">
+                  <p className="text-lg font-bold text-red-700 leading-tight mb-4">
                     {comment.message}
                   </p>
+
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {["😡", "💀", "🤬", "🔥", "💩"].map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleReaction(comment.id, emoji)}
+                        className="bg-orange-400 hover:bg-red-500 border-2 border-black px-3 py-1 text-xl font-black transform hover:scale-110 hover:rotate-12 transition-all"
+                      >
+                        {emoji} {comment.reactions[emoji] || 0}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() =>
+                      setReplyingTo(
+                        replyingTo === comment.id ? null : comment.id
+                      )
+                    }
+                    className="bg-lime-400 hover:bg-green-500 text-purple-900 font-black px-4 py-2 border-2 border-black transform hover:rotate-2 transition-all mb-3"
+                  >
+                    {replyingTo === comment.id
+                      ? "CANCEL REPLY"
+                      : `REPLY (${comment.replies.length})`}
+                  </button>
+
+                  {replyingTo === comment.id && (
+                    <div className="bg-pink-400 border-4 border-green-600 p-4 mt-3 transform -rotate-1">
+                      <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="Your name"
+                        className="w-full p-2 mb-2 text-lg font-bold border-2 border-purple-700 bg-yellow-200 text-black"
+                      />
+                      <textarea
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        placeholder="Your reply..."
+                        rows={2}
+                        className="w-full p-2 mb-2 text-lg font-bold border-2 border-purple-700 bg-yellow-200 text-black resize-none"
+                      />
+                      <button
+                        onClick={() => handleReply(comment.id)}
+                        className="bg-red-600 text-yellow-300 font-black px-4 py-2 border-2 border-black hover:bg-purple-700 transform hover:rotate-2 transition-all"
+                      >
+                        SUBMIT REPLY
+                      </button>
+                    </div>
+                  )}
+
+                  {comment.replies.length > 0 && (
+                    <div className="mt-4 space-y-2 pl-4 border-l-4 border-orange-600">
+                      {comment.replies.map((reply) => (
+                        <div
+                          key={reply.id}
+                          className="bg-lime-300 border-2 border-purple-600 p-3 transform rotate-1"
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="text-sm font-black text-purple-900 bg-orange-300 px-2 py-1 border border-red-600">
+                              {reply.name}
+                            </span>
+                            <span className="text-xs font-bold text-gray-700">
+                              {new Date(reply.timestamp).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-red-700">
+                            {reply.message}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))
             )}
