@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.Handle("/comments", withCORS(http.HandlerFunc(commentsHandler)))
+	mux.Handle("/reactions", withCORS(http.HandlerFunc(reactionsHandler)))
 
 	port := os.Getenv("API_PORT")
 	if port == "" {
@@ -77,21 +79,32 @@ func commentsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func reactionsHandler(w http.ResponseWriter, r *http.Request) {
+	// CORS preflight already handled in withCORS
+	switch r.Method {
+	case http.MethodPost:
+		postReaction(w, r)
+	default:
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+	}
+}
+
 type CommentDTO struct {
-	ID        string       `json:"id"`
-	Name      string       `json:"name"`
-	Message   string       `json:"message"`
-	Timestamp int64        `json:"timestamp"`
-	Replies   []CommentDTO `json:"replies"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Message   string         `json:"message"`
+	Timestamp int64          `json:"timestamp"`
+	Replies   []CommentDTO   `json:"replies"`
+	Reactions map[string]int `json:"reactions"`
 }
 
 func getComments(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// Order newest first to mirror the Next stub behavior
+	// Fetch comments
 	rows, err := db.QueryContext(ctx, `
-		SELECT id::text,
+		SELECT id,
 			   name,
 			   message,
 			   (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS ts,
@@ -119,6 +132,46 @@ func getComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch reactions for all comment IDs
+	commentIDs := make([]string, 0, len(out))
+	for _, c := range out {
+		commentIDs = append(commentIDs, c.ID)
+	}
+
+	reactionsMap := make(map[string]map[string]int)
+	if len(commentIDs) > 0 {
+		// Build the SQL IN clause dynamically
+		args := make([]any, len(commentIDs))
+		placeholders := make([]string, len(commentIDs))
+		for i, id := range commentIDs {
+			args[i] = id
+			placeholders[i] = "$" + strconv.Itoa(i+1)
+		}
+		query := `
+			SELECT comment_id, emoji, count
+			FROM reactions 
+			WHERE comment_id IN (` + strings.Join(placeholders, ",") + `)
+		`
+		reactionRows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to fetch reactions"})
+			return
+		}
+
+		defer reactionRows.Close()
+		for reactionRows.Next() {
+			var commentID, emoji string
+			var count int
+			if err := reactionRows.Scan(&commentID, &emoji, &count); err == nil {
+				if reactionsMap[commentID] == nil {
+					reactionsMap[commentID] = make(map[string]int)
+				}
+				reactionsMap[commentID][emoji] = count
+			}
+		}
+
+	}
+
 	// Convert flat comments to nested CommentDTOs
 	dtoMap := make(map[string]*CommentDTO)
 	var roots []CommentDTO
@@ -130,6 +183,10 @@ func getComments(w http.ResponseWriter, r *http.Request) {
 			Message:   c.Message,
 			Timestamp: c.Timestamp,
 			Replies:   []CommentDTO{},
+			Reactions: reactionsMap[c.ID],
+		}
+		if dto.Reactions == nil {
+			dto.Reactions = make(map[string]int)
 		}
 		dtoMap[c.ID] = &dto
 	}
@@ -174,7 +231,7 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	err := db.QueryRowContext(ctx, `
 		INSERT INTO comments (name, message, parent_id)
 		VALUES ($1, $2, $3)
-		RETURNING id::text,
+		RETURNING id,
 		          name,
 		          message,
 		          (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS ts,
@@ -224,4 +281,37 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func postReaction(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	var payload struct {
+		CommentID string `json:"commentId"`
+		Emoji     string `json:"emoji"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+
+	if payload.CommentID == "" || payload.Emoji == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Comment ID and emoji are required"})
+		return
+	}
+
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO reactions (comment_id, emoji, count)
+		VALUES ($1, $2, 1)
+		ON CONFLICT (comment_id, emoji) DO UPDATE
+		SET count = reactions.count + 1
+	`, payload.CommentID, payload.Emoji)
+	if err != nil {
+		log.Printf("insert reaction error: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to record reaction"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "reaction recorded"})
 }
