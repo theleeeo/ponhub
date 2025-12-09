@@ -112,7 +112,7 @@ func getComments(w http.ResponseWriter, r *http.Request) {
 			   parent_id
 		FROM comments
 		ORDER BY id DESC
-		LIMIT 50`)
+		LIMIT 100`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to fetch comments"})
 		return
