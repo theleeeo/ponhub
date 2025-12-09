@@ -377,7 +377,7 @@ export default function PONHatePage() {
                   </p>
 
                   <div className="flex flex-wrap gap-2 mb-3">
-                    {["😡", "💀", "🤬", "🔥", "💩"].map((emoji) => (
+                    {["🙌", "💀", "🔥", "💩", "🗜️"].map((emoji) => (
                       <button
                         key={emoji}
                         onClick={() => handleReaction(comment.id, emoji)}
