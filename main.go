@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -195,6 +196,13 @@ func getComments(w http.ResponseWriter, r *http.Request) {
 		if c.ParentID != nil && dtoMap[*c.ParentID] != nil {
 			parent := dtoMap[*c.ParentID]
 			parent.Replies = append(parent.Replies, *dtoMap[c.ID])
+
+			// Sort replies by ID
+			replies := parent.Replies
+			sort.Slice(replies, func(i, j int) bool {
+				return replies[i].ID < replies[j].ID
+			})
+			parent.Replies = replies
 		} else {
 			roots = append(roots, *dtoMap[c.ID])
 		}
