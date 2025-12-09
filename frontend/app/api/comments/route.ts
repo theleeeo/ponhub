@@ -83,6 +83,9 @@ export async function POST(request: Request) {
     }
 
     const comment: Comment = await res.json();
+    // Initialize reactions and replies for the new comment
+    comment.reactions = {};
+    comment.replies = [];
     return NextResponse.json(comment, { status: 201 });
   } catch (error) {
     console.error("Error creating comment:", error);
